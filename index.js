@@ -10,7 +10,7 @@ if (!fs.existsSync(TOKENS_FILE)) {
   process.exit(1);
 }
 const tokens = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
-const DISCORD_TOKEN = tokensv.DISCORD_TOKEN;
+const DISCORD_TOKEN = tokens.DISCORD_TOKEN;
 const GITHUB_TOKEN = tokens.GITHUB_TOKEN || '';
 if (!DISCORD_TOKEN) {
   console.error('DISCORD_TOKEN must be defined in tokens.json.');
