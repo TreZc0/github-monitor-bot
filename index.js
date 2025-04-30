@@ -123,7 +123,7 @@ async function checkAllRepos() {
         return;
 
       if (relObj) { //send msg in order of priority - release > tag > commit
-        const msg = `🚀 New release in **${entry.repo}**: **${relObj.name || relObj.tag_name}** — ${relObj.html_url}`;
+        const msg = `🚀 New release in **${entry.repo}**: **${relObj.name || relObj.tag_name}** — <${relObj.html_url}>`;
         activeChannels.forEach(ch => ch.send(msg));
       } else if (tagName) {
         const msg = `🏷️ New tag in **${entry.repo}**: \`${tagName}\` — <https://github.com/${entry.repo}/releases/tag/${tagName}>`;
