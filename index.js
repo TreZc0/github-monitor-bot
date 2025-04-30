@@ -100,6 +100,7 @@ async function checkAllRepos() {
         const msg = `🔄 New commit in **${entry.repo}**: https://github.com/${entry.repo}/commit/${commitSha}`;
         activeChannels.forEach(ch => ch.send(msg));
         entry.lastCommit = commitSha;
+        entry.lastCommitDate = new Date().toISOString();
       }
 
       // New tag?
