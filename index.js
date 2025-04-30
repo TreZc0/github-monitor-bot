@@ -92,33 +92,45 @@ async function checkAllRepos() {
 
   for (const entry of data.repos) {
     const [owner, name] = entry.repo.split('/');
+    let commitSha, tagName, relObj;
+    let initialCheck = !("lastCommit" in entry) || entry.lastCommit.length == 0;
     try {
       // New commit?
       const commits = await githubFetch(`https://api.github.com/repos/${owner}/${name}/commits?per_page=1`);
-      const commitSha = commits[0]?.sha;
-      if (commitSha && commitSha !== entry.lastCommit) {
-        const msg = `🔄 New commit in **${entry.repo}**: https://github.com/${entry.repo}/commit/${commitSha}`;
-        activeChannels.forEach(ch => ch.send(msg));
+
+      if (commits[0]?.sha && commits[0]?.sha !== entry.lastCommit) {
+        commitSha = commits[0]?.sha;
+
         entry.lastCommit = commitSha;
         entry.lastCommitDate = new Date().toISOString();
       }
 
       // New tag?
       const tags = await githubFetch(`https://api.github.com/repos/${owner}/${name}/tags?per_page=1`);
-      const tagName = tags[0]?.name;
-      if (tagName && tagName !== entry.lastTag) {
-        const msg = `🏷️ New tag in **${entry.repo}**: \`${tagName}\` — https://github.com/${entry.repo}/releases/tag/${tagName}`;
-        activeChannels.forEach(ch => ch.send(msg));
+      if (tags[0]?.name && tags[0]?.name !== entry.lastTag) {
+        tagName = tags[0]?.name;
         entry.lastTag = tagName;
       }
 
       // New release?
       const releases = await githubFetch(`https://api.github.com/repos/${owner}/${name}/releases?per_page=1`);
-      const rel = releases[0];
-      if (rel && rel.id !== entry.lastRelease) {
-        const msg = `🚀 New release in **${entry.repo}**: **${rel.name || rel.tag_name}** — ${rel.html_url}`;
+      if (releases[0] && releases[0].id !== entry.lastRelease) {
+        relObj = releases[0];
+        entry.lastRelease = relObj.id;
+      }
+
+      if (initialCheck) //no announcement for initial check after adding repo
+        return;
+
+      if (relObj) { //send msg in order of priority - release > tag > commit
+        const msg = `🚀 New release in **${entry.repo}**: **${relObj.name || relObj.tag_name}** — ${relObj.html_url}`;
         activeChannels.forEach(ch => ch.send(msg));
-        entry.lastRelease = rel.id;
+      } else if (tagName) {
+        const msg = `🏷️ New tag in **${entry.repo}**: \`${tagName}\` — <https://github.com/${entry.repo}/releases/tag/${tagName}>`;
+        activeChannels.forEach(ch => ch.send(msg));
+      } else if (commitSha) {
+        const msg = `🔄 New commit in **${entry.repo}**: <https://github.com/${entry.repo}/commit/${commitSha}>`;
+        activeChannels.forEach(ch => ch.send(msg));
       }
     } catch (err) {
       console.error(`Error checking ${entry.repo}:`, err.message);
