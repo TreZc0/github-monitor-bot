@@ -93,7 +93,7 @@ async function checkAllRepos() {
   for (const entry of data.repos) {
     const [owner, name] = entry.repo.split('/');
     let commitSha, tagName, relObj;
-    let initialCheck = !("lastCommit" in entry) || entry.lastCommit.length == 0;
+    let initialCheck = !("lastRelease" in entry) || (entry.lastRelease && entry.lastRelease.length == 0);
     try {
       // New commit?
       const commits = await githubFetch(`https://api.github.com/repos/${owner}/${name}/commits?per_page=1`);
@@ -123,13 +123,10 @@ async function checkAllRepos() {
         return;
 
       if (relObj) { //send msg in order of priority - release > tag > commit
-        const msg = `🚀 New release in **${entry.repo}**: **${relObj.name || relObj.tag_name}** — <${relObj.html_url}>`;
+        const msg = `New release in **${entry.repo}**: **${relObj.name || relObj.tag_name}** — <${relObj.html_url}>`;
         activeChannels.forEach(ch => ch.send(msg));
       } else if (tagName) {
-        const msg = `🏷️ New tag in **${entry.repo}**: \`${tagName}\` — <https://github.com/${entry.repo}/releases/tag/${tagName}>`;
-        activeChannels.forEach(ch => ch.send(msg));
-      } else if (commitSha) {
-        const msg = `🔄 New commit in **${entry.repo}**: <https://github.com/${entry.repo}/commit/${commitSha}>`;
+        const msg = `New tag in **${entry.repo}**: \`${tagName}\` — <https://github.com/${entry.repo}/releases/tag/${tagName}>`;
         activeChannels.forEach(ch => ch.send(msg));
       }
     } catch (err) {

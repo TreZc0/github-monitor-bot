@@ -23,8 +23,8 @@ function parseGitHubRepo(input) {
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('addrepo')
-    .setDescription('Monitor a GitHub repo for updates')
+    .setName('removerepo')
+    .setDescription('Stop monitoring a GitHub repo')
     .addStringOption(option =>
       option.setName('repo')
         .setDescription('Repository in owner/repo format or GitHub URL')
@@ -41,11 +41,19 @@ module.exports = {
       });
     }
 
-    if (data.repos.some(r => r.repo === repo)) {
-      return interaction.reply({ content: `${repo} is already monitored.`, flags: MessageFlags.Ephemeral });
+    const index = data.repos.findIndex(r => r.repo === repo);
+    if (index === -1) {
+      return interaction.reply({
+        content: `Repository **${repo}** is not being monitored.`,
+        flags: MessageFlags.Ephemeral
+      });
     }
-    data.repos.push({ repo, lastCommit: null, lastTag: null, lastRelease: null });
+
+    data.repos.splice(index, 1);
     writeData();
-    return interaction.reply({ content: `Now monitoring **${repo}**.`, flags: MessageFlags.Ephemeral });
+    return interaction.reply({
+      content: `Stopped monitoring **${repo}**.`,
+      flags: MessageFlags.Ephemeral
+    });
   }
 };
