@@ -189,12 +189,14 @@ async function checkAllFeeds() {
 
       // Track whether anything changed so we only write once
       let changed = false;
-      // On the very first parse of this feed, announce only the newest entry
+      // On the very first parse of this feed, don't announce anything
       const isNewFeed = Object.keys(feed.lastSeen).length === 0;
-      let announcedInitial = false;
 
       // Capture the original lastSeen state before we start modifying it
       const originalLastSeen = { ...feed.lastSeen };
+
+      // Track which repos have been announced in this check to avoid duplicates
+      const announcedReposThisCheck = new Set();
 
       for (const entry of entries) {
         // Resolve link href — Atom uses <link href="..."/>, RSS uses <link>text</link>
@@ -214,15 +216,15 @@ async function checkAllFeeds() {
 
         if (prevId === entryId) continue; // nothing new
 
-        const isFirstSeen = prevId === undefined;
         feed.lastSeen[repo] = entryId;
         changed = true;
 
-        if (isFirstSeen) {
-          // On a brand-new feed, announce only the first (newest) entry; skip the rest
-          if (!isNewFeed || announcedInitial) continue;
-          announcedInitial = true;
-        }
+        // Don't announce anything on first track
+        if (isNewFeed) continue;
+
+        // Only announce the first (newest) occurrence of each repo
+        if (announcedReposThisCheck.has(repo)) continue;
+        announcedReposThisCheck.add(repo);
 
         // Build announcement matching the manually-tracked repo format
         const title = typeof entry.title === 'string' ? entry.title : entry.title?.['#text'] || '';
