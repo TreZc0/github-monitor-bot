@@ -193,6 +193,9 @@ async function checkAllFeeds() {
       const isNewFeed = Object.keys(feed.lastSeen).length === 0;
       let announcedInitial = false;
 
+      // Capture the original lastSeen state before we start modifying it
+      const originalLastSeen = { ...feed.lastSeen };
+
       for (const entry of entries) {
         // Resolve link href — Atom uses <link href="..."/>, RSS uses <link>text</link>
         const linkHref = entry.link?.['@_href']
@@ -207,7 +210,7 @@ async function checkAllFeeds() {
 
         // Unique identifier for this entry: prefer <id>, fall back to link
         const entryId = entry.id || linkHref || '';
-        const prevId = feed.lastSeen[repo];
+        const prevId = originalLastSeen[repo];
 
         if (prevId === entryId) continue; // nothing new
 
