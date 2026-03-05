@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { XMLParser } = require('fast-xml-parser');
 const { Client, Collection, GatewayIntentBits, MessageFlags } = require('discord.js');
 
 // Load tokens
@@ -38,9 +39,10 @@ let data;
 if (fs.existsSync(DATA_FILE)) {
   data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 } else {
-  data = { repos: [], channels: [] };
+  data = { repos: [], feeds: [], channels: [] };
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
+if (!data.feeds) data.feeds = [];
 function writeData() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
@@ -59,6 +61,9 @@ client.once('ready', async () => {
   // Initial check and periodic polling
   await checkAllRepos();
   setInterval(checkAllRepos, 30 * 60 * 1000);
+
+  await checkAllFeeds();
+  setInterval(checkAllFeeds, 15 * 60 * 1000);
 });
 
 // Command handling
@@ -134,6 +139,99 @@ async function checkAllRepos() {
     }
   }
   writeData();
+}
+
+// Extract a "owner/repo" string from a GitHub URL, or null if not a GitHub repo URL
+function repoFromUrl(href) {
+  if (!href) return null;
+  const m = href.match(/github\.com\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+?)(?:\/|$)/);
+  return m ? m[1].replace(/\.git$/, '') : null;
+}
+
+// Force an array even if fast-xml-parser gave us a single object
+function asArray(val) {
+  if (!val) return [];
+  return Array.isArray(val) ? val : [val];
+}
+
+// Poll all registered Atom/XML feeds and announce new entries for repos not manually tracked
+async function checkAllFeeds() {
+  if (!data.feeds || !data.feeds.length) return;
+  if (!data.channels.length) return;
+
+  const activeChannels = [];
+  for (const cfg of data.channels) {
+    try {
+      const ch = await client.channels.fetch(cfg.channelId);
+      if (ch) activeChannels.push(ch);
+    } catch {
+      console.error('Invalid channel config:', cfg);
+    }
+  }
+  if (!activeChannels.length) return;
+
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    isArray: (name) => name === 'entry' || name === 'item',
+  });
+
+  for (const feed of data.feeds) {
+    try {
+      const res = await axios.get(feed.url, { headers: { 'User-Agent': 'discord-github-bot' }, timeout: 15000 });
+      const raw = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      const parsed = parser.parse(raw);
+
+      // Support both Atom (<feed><entry>) and RSS (<rss><channel><item>)
+      const entries = asArray(parsed?.feed?.entry) .concat(asArray(parsed?.rss?.channel?.item));
+
+      if (!entries.length) continue;
+
+      // Track whether anything changed so we only write once
+      let changed = false;
+      // On the very first parse of this feed, announce only the newest entry
+      const isNewFeed = Object.keys(feed.lastSeen).length === 0;
+      let announcedInitial = false;
+
+      for (const entry of entries) {
+        // Resolve link href — Atom uses <link href="..."/>, RSS uses <link>text</link>
+        const linkHref = entry.link?.['@_href']
+          || (typeof entry.link === 'string' ? entry.link : null)
+          || entry.link?.['#text'];
+
+        const repo = repoFromUrl(linkHref) || repoFromUrl(entry.id);
+        if (!repo) continue;
+
+        // Skip repos already manually tracked — they're handled by checkAllRepos
+        if (data.repos.some(r => r.repo === repo)) continue;
+
+        // Unique identifier for this entry: prefer <id>, fall back to link
+        const entryId = entry.id || linkHref || '';
+        const prevId = feed.lastSeen[repo];
+
+        if (prevId === entryId) continue; // nothing new
+
+        const isFirstSeen = prevId === undefined;
+        feed.lastSeen[repo] = entryId;
+        changed = true;
+
+        if (isFirstSeen) {
+          // On a brand-new feed, announce only the first (newest) entry; skip the rest
+          if (!isNewFeed || announcedInitial) continue;
+          announcedInitial = true;
+        }
+
+        // Build announcement matching the manually-tracked repo format
+        const title = typeof entry.title === 'string' ? entry.title : entry.title?.['#text'] || '';
+        const msg = `New release in **${repo}**: **${title}** — <${linkHref || entryId}>`;
+        activeChannels.forEach(ch => ch.send(msg));
+      }
+
+      if (changed) writeData();
+    } catch (err) {
+      console.error(`Error checking feed ${feed.url}:`, err.message);
+    }
+  }
 }
 
 // GitHub API helper
