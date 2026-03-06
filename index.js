@@ -183,17 +183,49 @@ async function checkAllFeeds() {
       const parsed = parser.parse(raw);
 
       // Support both Atom (<feed><entry>) and RSS (<rss><channel><item>)
-      const entries = asArray(parsed?.feed?.entry) .concat(asArray(parsed?.rss?.channel?.item));
+      const entries = asArray(parsed?.feed?.entry).concat(asArray(parsed?.rss?.channel?.item));
 
       if (!entries.length) continue;
 
-      // Track whether anything changed so we only write once
-      let changed = false;
-      // On the very first parse of this feed, announce only the newest entry
-      const isNewFeed = Object.keys(feed.lastSeen).length === 0;
-      let announcedInitial = false;
+      // Migrate old lastSeen-based feeds to timestamp-based tracking
+      if (!feed.lastTimestamp && feed.lastSeen && Object.keys(feed.lastSeen).length > 0) {
+        feed.lastTimestamp = new Date().toISOString();
+        delete feed.lastSeen;
+        writeData();
+        continue;
+      }
+
+      const isNewFeed = !feed.lastTimestamp;
+      const lastTimestamp = feed.lastTimestamp ? new Date(feed.lastTimestamp) : null;
+
+      // Find the max updated timestamp across all entries (to save as the new watermark)
+      let maxTimestamp = lastTimestamp;
+      const newEntries = [];
 
       for (const entry of entries) {
+        const updatedStr = entry.updated || entry.pubDate || '';
+        const updatedDate = updatedStr ? new Date(updatedStr) : null;
+
+        if (updatedDate && !isNaN(updatedDate.getTime())) {
+          if (!maxTimestamp || updatedDate > maxTimestamp) maxTimestamp = updatedDate;
+          if (!isNewFeed && lastTimestamp && updatedDate > lastTimestamp) {
+            newEntries.push({ entry, updatedDate });
+          }
+        }
+      }
+
+      // Save the new high-water mark
+      if (maxTimestamp) {
+        feed.lastTimestamp = maxTimestamp.toISOString();
+        writeData();
+      }
+
+      if (isNewFeed || !newEntries.length) continue;
+
+      // Announce in chronological order (oldest first)
+      newEntries.sort((a, b) => a.updatedDate - b.updatedDate);
+
+      for (const { entry } of newEntries) {
         // Resolve link href — Atom uses <link href="..."/>, RSS uses <link>text</link>
         const linkHref = entry.link?.['@_href']
           || (typeof entry.link === 'string' ? entry.link : null)
@@ -205,29 +237,10 @@ async function checkAllFeeds() {
         // Skip repos already manually tracked — they're handled by checkAllRepos
         if (data.repos.some(r => r.repo === repo)) continue;
 
-        // Unique identifier for this entry: prefer <id>, fall back to link
-        const entryId = entry.id || linkHref || '';
-        const prevId = feed.lastSeen[repo];
-
-        if (prevId === entryId) continue; // nothing new
-
-        const isFirstSeen = prevId === undefined;
-        feed.lastSeen[repo] = entryId;
-        changed = true;
-
-        if (isFirstSeen) {
-          // On a brand-new feed, announce only the first (newest) entry; skip the rest
-          if (!isNewFeed || announcedInitial) continue;
-          announcedInitial = true;
-        }
-
-        // Build announcement matching the manually-tracked repo format
         const title = typeof entry.title === 'string' ? entry.title : entry.title?.['#text'] || '';
-        const msg = `New release in **${repo}**: **${title}** — <${linkHref || entryId}>`;
+        const msg = `New release in **${repo}**: **${title}** — <${linkHref || entry.id}>`;
         activeChannels.forEach(ch => ch.send(msg));
       }
-
-      if (changed) writeData();
     } catch (err) {
       console.error(`Error checking feed ${feed.url}:`, err.message);
     }
