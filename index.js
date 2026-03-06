@@ -195,8 +195,8 @@ async function checkAllFeeds() {
       // Capture the original lastSeen state before we start modifying it
       const originalLastSeen = { ...feed.lastSeen };
 
-      // Track which repos have been announced in this check to avoid duplicates
-      const announcedReposThisCheck = new Set();
+      // Track which repos have been processed in this check to avoid duplicates
+      const processedReposThisCheck = new Set();
 
       for (const entry of entries) {
         // Resolve link href — Atom uses <link href="..."/>, RSS uses <link>text</link>
@@ -210,24 +210,29 @@ async function checkAllFeeds() {
         // Skip repos already manually tracked — they're handled by checkAllRepos
         if (data.repos.some(r => r.repo === repo)) continue;
 
-        // Unique identifier for this entry: prefer <id>, fall back to link
-        const entryId = entry.id || linkHref || '';
-        const prevId = originalLastSeen[repo];
+        // Get the updated timestamp for this entry
+        const updatedTimestamp = typeof entry.updated === 'string' ? entry.updated : entry.updated?.['#text'] || '';
+        if (!updatedTimestamp) continue; // Skip entries without updated timestamp
 
-        if (prevId === entryId) continue; // nothing new
+        // Skip if we've already processed this repo in this check (only process the first/newest entry)
+        if (processedReposThisCheck.has(repo)) continue;
+        processedReposThisCheck.add(repo);
 
-        feed.lastSeen[repo] = entryId;
+        const lastSeenTimestamp = originalLastSeen[repo];
+
+        // If we've seen a newer or equal timestamp before, nothing new
+        if (lastSeenTimestamp && updatedTimestamp <= lastSeenTimestamp) continue;
+
+        // This is a new or updated entry for this repo
+        feed.lastSeen[repo] = updatedTimestamp;
         changed = true;
 
         // Don't announce anything on first track
         if (isNewFeed) continue;
 
-        // Only announce the first (newest) occurrence of each repo
-        if (announcedReposThisCheck.has(repo)) continue;
-        announcedReposThisCheck.add(repo);
-
         // Build announcement matching the manually-tracked repo format
         const title = typeof entry.title === 'string' ? entry.title : entry.title?.['#text'] || '';
+        const entryId = entry.id || linkHref || '';
         const msg = `New release in **${repo}**: **${title}** — <${linkHref || entryId}>`;
         activeChannels.forEach(ch => ch.send(msg));
       }
