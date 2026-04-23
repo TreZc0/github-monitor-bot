@@ -117,10 +117,11 @@ async function checkAllRepos() {
         entry.lastTag = tagName;
       }
 
-      // New release?
-      const releases = await githubFetch(`https://api.github.com/repos/${owner}/${name}/releases?per_page=1`);
-      if (releases[0] && releases[0].id !== entry.lastRelease) {
-        relObj = releases[0];
+      // New release? Fetch a few to allow filtering out drafts (drafts are visible with auth tokens but shouldn't be announced)
+      const releases = await githubFetch(`https://api.github.com/repos/${owner}/${name}/releases?per_page=5`);
+      const latestPublished = releases.find(r => !r.draft);
+      if (latestPublished && latestPublished.id !== entry.lastRelease) {
+        relObj = latestPublished;
         entry.lastRelease = relObj.id;
       }
 
